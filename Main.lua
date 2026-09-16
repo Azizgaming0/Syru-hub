@@ -1,6 +1,5 @@
 local UserInputService = game:GetService("UserInputService")
 local TweenService = game:GetService("TweenService")
-local RunService = game:GetService("RunService")
 local CoreGui = game:GetService("CoreGui")
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
@@ -36,11 +35,7 @@ local SyruLib = {
 		TextDark = Color3.fromRGB(160, 160, 170)
 	},
 	Sizes = {
-		["Tiny"]   = Vector2.new(360, 220),
-		["Small"]  = Vector2.new(440, 270),
-		["Medium"] = Vector2.new(520, 320),
-		["Big"]    = Vector2.new(590, 360),
-		["Large"]  = Vector2.new(660, 410)
+		["Medium"] = Vector2.new(520, 320)
 	}
 }
 
@@ -249,25 +244,9 @@ function SyruLib:CreateWindow(config)
 	end)
 
 	---------------------------------------------------------------------
-	-- TABS & CONTROLS BUILDER
+	-- TAB SYSTEM
 	---------------------------------------------------------------------
-	local Window = { Tabs = {}, ActiveTab = nil, CurrentSize = "Medium" }
-
-	function Window:SetSize(sizeName)
-		local targetDimensions = SyruLib.Sizes[sizeName]
-		if not targetDimensions then return end
-
-		Window.CurrentSize = sizeName
-		local currentCenterX = Main.Position.X.Offset + (Main.AbsoluteSize.X / 2)
-		local currentCenterY = Main.Position.Y.Offset + (Main.AbsoluteSize.Y / 2)
-		local newPosX = currentCenterX - (targetDimensions.X / 2)
-		local newPosY = currentCenterY - (targetDimensions.Y / 2)
-
-		TweenService:Create(Main, TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-			Size = UDim2.new(0, targetDimensions.X, 0, targetDimensions.Y),
-			Position = UDim2.new(Main.Position.X.Scale, newPosX, Main.Position.Y.Scale, newPosY)
-		}):Play()
-	end
+	local Window = { Tabs = {}, ActiveTab = nil }
 
 	function Window:CreateTab(name)
 		local TabButton = Instance.new("TextButton")
@@ -392,7 +371,7 @@ function SyruLib:CreateWindow(config)
 			Label.TextSize = 12
 			Label.Font = Enum.Font.GothamSemibold
 			Label.TextXAlignment = Enum.TextXAlignment.Left
-			Label.Active = false -- Avoid blocking parent button clicks
+			Label.Active = false
 			Label.Parent = Toggle
 
 			local Switch = Instance.new("Frame")
@@ -439,202 +418,6 @@ function SyruLib:CreateWindow(config)
 			end
 		end
 
-		function Elements:AddSlider(text, min, max, default, callback)
-			local value = default or min
-
-			local Slider = Instance.new("Frame")
-			Slider.Size = UDim2.new(1, 0, 0, 42)
-			Slider.BackgroundColor3 = SyruLib.Theme.Card
-			Slider.LayoutOrder = nextOrder()
-			Slider.Parent = Page
-
-			local SliderCorner = Instance.new("UICorner")
-			SliderCorner.CornerRadius = UDim.new(0, 6)
-			SliderCorner.Parent = Slider
-
-			local SliderStroke = Instance.new("UIStroke")
-			SliderStroke.Color = SyruLib.Theme.CardStroke
-			SliderStroke.Thickness = 1
-			SliderStroke.Parent = Slider
-
-			local Label = Instance.new("TextLabel")
-			Label.Size = UDim2.new(1, -60, 0, 18)
-			Label.Position = UDim2.new(0, 10, 0, 4)
-			Label.BackgroundTransparency = 1
-			Label.Text = text
-			Label.TextColor3 = SyruLib.Theme.Text
-			Label.TextSize = 12
-			Label.Font = Enum.Font.GothamSemibold
-			Label.TextXAlignment = Enum.TextXAlignment.Left
-			Label.Parent = Slider
-
-			local ValLabel = Instance.new("TextLabel")
-			ValLabel.Size = UDim2.new(0, 45, 0, 18)
-			ValLabel.Position = UDim2.new(1, -55, 0, 4)
-			ValLabel.BackgroundTransparency = 1
-			ValLabel.Text = tostring(value)
-			ValLabel.TextColor3 = SyruLib.Theme.TextDark
-			ValLabel.TextSize = 12
-			ValLabel.Font = Enum.Font.GothamBold
-			ValLabel.TextXAlignment = Enum.TextXAlignment.Right
-			ValLabel.Parent = Slider
-
-			local Bar = Instance.new("Frame")
-			Bar.Size = UDim2.new(1, -20, 0, 5)
-			Bar.Position = UDim2.new(0, 10, 1, -12)
-			Bar.BackgroundColor3 = Color3.fromRGB(45, 45, 52)
-			Bar.BorderSizePixel = 0
-			Bar.Parent = Bar
-
-			local BarCorner = Instance.new("UICorner")
-			BarCorner.CornerRadius = UDim.new(1, 0)
-			BarCorner.Parent = Bar
-
-			local Fill = Instance.new("Frame")
-			local defaultPct = math.clamp((value - min) / (max - min), 0, 1)
-			Fill.Size = UDim2.new(defaultPct, 0, 1, 0)
-			Fill.BackgroundColor3 = accentColor
-			Fill.BorderSizePixel = 0
-			Fill.Parent = Bar
-
-			local FillCorner = Instance.new("UICorner")
-			FillCorner.CornerRadius = UDim.new(1, 0)
-			FillCorner.Parent = Fill
-
-			local sliding = false
-			local function updateSlider(input)
-				local percent = math.clamp((input.Position.X - Bar.AbsolutePosition.X) / Bar.AbsoluteSize.X, 0, 1)
-				local exactVal = math.floor(min + (max - min) * percent)
-				Fill.Size = UDim2.new(percent, 0, 1, 0)
-				ValLabel.Text = tostring(exactVal)
-				if callback then task.spawn(callback, exactVal) end
-			end
-
-			Bar.InputBegan:Connect(function(input)
-				if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-					sliding = true
-					updateSlider(input)
-				end
-			end)
-
-			UserInputService.InputEnded:Connect(function(input)
-				if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-					sliding = false
-				end
-			end)
-
-			UserInputService.InputChanged:Connect(function(input)
-				if sliding and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-					updateSlider(input)
-				end
-			end)
-		end
-
-		function Elements:AddDropdown(text, options, default, callback)
-			local selected = default or options[1]
-			local dropped = false
-
-			local Dropdown = Instance.new("Frame")
-			Dropdown.Size = UDim2.new(1, 0, 0, 34)
-			Dropdown.BackgroundColor3 = SyruLib.Theme.Card
-			Dropdown.ClipsDescendants = true
-			Dropdown.LayoutOrder = nextOrder()
-			Dropdown.Parent = Page
-
-			local DropCorner = Instance.new("UICorner")
-			DropCorner.CornerRadius = UDim.new(0, 6)
-			DropCorner.Parent = Dropdown
-
-			local DropStroke = Instance.new("UIStroke")
-			DropStroke.Color = SyruLib.Theme.CardStroke
-			DropStroke.Thickness = 1
-			DropStroke.Parent = Dropdown
-
-			local HeaderBtn = Instance.new("TextButton")
-			HeaderBtn.Size = UDim2.new(1, 0, 0, 34)
-			HeaderBtn.BackgroundTransparency = 1
-			HeaderBtn.Text = ""
-			HeaderBtn.Parent = Dropdown
-
-			local Label = Instance.new("TextLabel")
-			Label.Size = UDim2.new(1, -100, 1, 0)
-			Label.Position = UDim2.new(0, 10, 0, 0)
-			Label.BackgroundTransparency = 1
-			Label.Text = text
-			Label.TextColor3 = SyruLib.Theme.Text
-			Label.TextSize = 12
-			Label.Font = Enum.Font.GothamSemibold
-			Label.TextXAlignment = Enum.TextXAlignment.Left
-			Label.Active = false
-			Label.Parent = HeaderBtn
-
-			local ValLabel = Instance.new("TextLabel")
-			ValLabel.Size = UDim2.new(0, 70, 1, 0)
-			ValLabel.Position = UDim2.new(1, -95, 0, 0)
-			ValLabel.BackgroundTransparency = 1
-			ValLabel.Text = selected
-			ValLabel.TextColor3 = accentColor
-			ValLabel.TextSize = 11
-			ValLabel.Font = Enum.Font.GothamBold
-			ValLabel.TextXAlignment = Enum.TextXAlignment.Right
-			ValLabel.Active = false
-			ValLabel.Parent = HeaderBtn
-
-			local Arrow = Instance.new("TextLabel")
-			Arrow.Size = UDim2.new(0, 18, 1, 0)
-			Arrow.Position = UDim2.new(1, -22, 0, 0)
-			Arrow.BackgroundTransparency = 1
-			Arrow.Text = "v"
-			Arrow.TextColor3 = SyruLib.Theme.TextDark
-			Arrow.TextSize = 11
-			Arrow.Font = Enum.Font.GothamBold
-			Arrow.Active = false
-			Arrow.Parent = HeaderBtn
-
-			local OptionContainer = Instance.new("Frame")
-			OptionContainer.Size = UDim2.new(1, -12, 0, #options * 26)
-			OptionContainer.Position = UDim2.new(0, 6, 0, 34)
-			OptionContainer.BackgroundTransparency = 1
-			OptionContainer.Parent = Dropdown
-
-			local OptionLayout = Instance.new("UIListLayout")
-			OptionLayout.Padding = UDim.new(0, 2)
-			OptionLayout.SortOrder = Enum.SortOrder.LayoutOrder
-			OptionLayout.Parent = OptionContainer
-
-			local function toggleDropdown()
-				dropped = not dropped
-				local targetHeight = dropped and (34 + (#options * 26) + 6) or 34
-				TweenService:Create(Dropdown, TweenInfo.new(0.2), {Size = UDim2.new(1, 0, 0, targetHeight)}):Play()
-				TweenService:Create(Arrow, TweenInfo.new(0.2), {Rotation = dropped and 180 or 0}):Play()
-			end
-
-			HeaderBtn.MouseButton1Click:Connect(toggleDropdown)
-
-			for _, optName in ipairs(options) do
-				local OptBtn = Instance.new("TextButton")
-				OptBtn.Size = UDim2.new(1, 0, 0, 24)
-				OptBtn.BackgroundColor3 = Color3.fromRGB(36, 36, 44)
-				OptBtn.Text = optName
-				OptBtn.TextColor3 = SyruLib.Theme.TextDark
-				OptBtn.TextSize = 11
-				OptBtn.Font = Enum.Font.GothamMedium
-				OptBtn.AutoButtonColor = false
-				OptBtn.Parent = OptionContainer
-
-				local OptCorner = Instance.new("UICorner")
-				OptCorner.CornerRadius = UDim.new(0, 4)
-				OptCorner.Parent = OptBtn
-
-				OptBtn.MouseButton1Click:Connect(function()
-					selected = optName
-					ValLabel.Text = selected
-					toggleDropdown()
-					if callback then task.spawn(callback, selected) end
-				end)
-			end
-		end
-
 		return Elements
 	end
 
@@ -642,7 +425,7 @@ function SyruLib:CreateWindow(config)
 end
 
 ---------------------------------------------------------------------
--- WINDOW INITIALIZATION & TABS
+-- INITIALIZATION
 ---------------------------------------------------------------------
 local Window = SyruLib:CreateWindow({
 	Title = "SYRU HUB",
@@ -651,11 +434,9 @@ local Window = SyruLib:CreateWindow({
 })
 
 local FarmTab = Window:CreateTab("Farm")
-local MiscTab = Window:CreateTab("Misc")
-local SettingsTab = Window:CreateTab("Settings")
 
 ---------------------------------------------------------------------
--- TAB 1: FARM AUTOMATION
+-- TAB: FARM AUTOMATION
 ---------------------------------------------------------------------
 FarmTab:AddSection("Egg Harvesting")
 
@@ -715,25 +496,8 @@ FarmTab:AddToggle("Return to Origin Spot", true, function(state)
 	returnToStart = state
 end)
 
--- 2. Auto Deposit Eggs
-local depositActive = false
-FarmTab:AddToggle("Auto Deposit Eggs", false, function(state)
-	depositActive = state
-	if state then
-		task.spawn(function()
-			while depositActive do
-				pcall(function()
-					invokeServer(remoteFunction, "Deposit Eggs")
-				end)
-				task.wait(1)
-			end
-		end)
-	end
-end)
-
 FarmTab:AddSection("Breeding & Merging")
 
--- 3. Auto Merge
 local mergeActive = false
 FarmTab:AddToggle("Auto Merge", false, function(state)
 	mergeActive = state
@@ -749,9 +513,23 @@ FarmTab:AddToggle("Auto Merge", false, function(state)
 	end
 end)
 
+local depositActive = false
+FarmTab:AddToggle("Auto Deposit Eggs", false, function(state)
+	depositActive = state
+	if state then
+		task.spawn(function()
+			while depositActive do
+				pcall(function()
+					invokeServer(remoteFunction, "Deposit Eggs")
+				end)
+				task.wait(1)
+			end
+		end)
+	end
+end)
+
 FarmTab:AddSection("Obby Rewards")
 
--- 4. Complete Obby
 local obbyActive = false
 FarmTab:AddToggle("Complete Obby", false, function(state)
 	obbyActive = state
@@ -798,7 +576,6 @@ end)
 
 FarmTab:AddSection("Economy & Upgrades")
 
--- 5. Auto Collect Cash
 local cashActive = false
 FarmTab:AddToggle("Auto Collect Cash", false, function(state)
 	cashActive = state
@@ -814,7 +591,7 @@ FarmTab:AddToggle("Auto Collect Cash", false, function(state)
 	end
 end)
 
--- 6. Auto Upgrade Process Level
+-- Upgraded to 0.1s delay
 local upgradeActive = false
 FarmTab:AddToggle("Auto Upgrade Level", false, function(state)
 	upgradeActive = state
@@ -824,13 +601,13 @@ FarmTab:AddToggle("Auto Upgrade Level", false, function(state)
 				pcall(function()
 					invokeServer(remoteFunction, "Upgrade Process Level")
 				end)
-				task.wait(1.5)
+				task.wait(0.1)
 			end
 		end)
 	end
 end)
 
--- 7. Auto Buy Chickens
+-- Upgraded to 0.1s delay
 local buyActive = false
 local chickenTiers = {100, 25, 5, 1}
 FarmTab:AddToggle("Auto Buy Chickens", false, function(state)
@@ -846,86 +623,8 @@ FarmTab:AddToggle("Auto Buy Chickens", false, function(state)
 						break
 					end
 				end
-				task.wait(2)
+				task.wait(0.1)
 			end
 		end)
 	end
-end)
-
----------------------------------------------------------------------
--- TAB 2: MISC UTILITIES
----------------------------------------------------------------------
-MiscTab:AddSection("Movement Modifiers")
-
-local defaultSpeed = 16
-MiscTab:AddSlider("Walk Speed", 16, 120, 16, function(val)
-	defaultSpeed = val
-	local hum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
-	if hum then hum.WalkSpeed = val end
-end)
-
-local defaultJump = 50
-MiscTab:AddSlider("Jump Power", 50, 200, 50, function(val)
-	defaultJump = val
-	local hum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
-	if hum then
-		hum.UseJumpPower = true
-		hum.JumpPower = val
-	end
-end)
-
-LocalPlayer.CharacterAdded:Connect(function(char)
-	local hum = char:WaitForChild("Humanoid", 5)
-	if hum then
-		hum.WalkSpeed = defaultSpeed
-		hum.UseJumpPower = true
-		hum.JumpPower = defaultJump
-	end
-end)
-
-MiscTab:AddSection("Physics & Traversal")
-
-local infJumpActive = false
-MiscTab:AddToggle("Infinite Jump", false, function(state)
-	infJumpActive = state
-end)
-
-UserInputService.JumpRequest:Connect(function()
-	if infJumpActive then
-		local hum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
-		if hum then
-			hum:ChangeState(Enum.HumanoidStateType.Jumping)
-		end
-	end
-end)
-
-local noclipActive = false
-local noclipConn = nil
-MiscTab:AddToggle("NoClip", false, function(state)
-	noclipActive = state
-	if state then
-		noclipConn = RunService.Stepped:Connect(function()
-			if noclipActive and LocalPlayer.Character then
-				for _, part in ipairs(LocalPlayer.Character:GetDescendants()) do
-					if part:IsA("BasePart") and part.CanCollide then
-						part.CanCollide = false
-					end
-				end
-			end
-		end)
-	else
-		if noclipConn then
-			noclipConn:Disconnect()
-			noclipConn = nil
-		end
-	end
-end)
-
----------------------------------------------------------------------
--- TAB 3: SETTINGS
----------------------------------------------------------------------
-SettingsTab:AddSection("Window Configuration")
-
-SettingsTab:AddDropdown("UI Size", {"Tiny", "Small", "Medium", "Big", "Large"}, "Medium", function(size)
-	Window:SetSize(size)
 end)
