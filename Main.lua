@@ -637,46 +637,69 @@ local MiscTab = Window:CreateTab("Misc")
 local SettingsTab = Window:CreateTab("Settings")
 
 ---------------------------------------------------------------------
--- TAB 1: FARM AUTOMATION (High-Speed & Loop-Safe)
+-- TAB 1: FARM AUTOMATION (Batch-Controlled High Throughput)
 ---------------------------------------------------------------------
 FarmTab:AddSection("Egg Harvesting")
 
--- 1. High-Speed Dual-Engine Egg Collector
+-- 1. Batch-Controlled Non-Blocking Egg Collector
 local eggConn = nil
 local pollActive = false
+local pendingEggs = {}
 
 FarmTab:AddToggle("Instant Collect Eggs", false, function(state)
 	pollActive = state
+	table.clear(pendingEggs)
+
 	if state then
-		-- Engine 1: Micro-deferred Event Listener
+		-- Engine 1: Instant Listener for Fresh Spawns
 		if not eggConn then
 			eggConn = eggsFolder.ChildAdded:Connect(function(egg)
-				task.defer(function()
-					fireServer(remoteEvent, "Collect Egg", egg.Name)
-				end)
+				if not pollActive then return end
+				local id = egg.Name
+				if not pendingEggs[id] then
+					pendingEggs[id] = true
+					fireServer(remoteEvent, "Collect Egg", id)
+				end
 			end)
 		end
 
-		-- Engine 2: 10Hz Threaded Catch-up Sweeper
+		-- Engine 2: Chunked Sweeper for Existing/Stranded Eggs (Prevents UI lockup)
 		task.spawn(function()
 			while pollActive do
 				local eggs = eggsFolder:GetChildren()
-				if #eggs > 0 then
-					for i = 1, #eggs do
-						local egg = eggs[i]
-						if egg and egg.Parent then
-							task.spawn(fireServer, remoteEvent, "Collect Egg", egg.Name)
+				local batchCount = 0
+
+				for i = 1, #eggs do
+					if not pollActive then break end
+					local egg = eggs[i]
+					if egg and egg.Parent then
+						local id = egg.Name
+						if not pendingEggs[id] then
+							pendingEggs[id] = true
+							fireServer(remoteEvent, "Collect Egg", id)
+							batchCount = batchCount + 1
+
+							-- Yield every 25 fires to let the UI and engine breathe
+							if batchCount >= 25 then
+								batchCount = 0
+								task.wait()
+							end
 						end
 					end
 				end
-				task.wait(0.1)
+
+				-- Clear cache periodically so memory stays lean
+				table.clear(pendingEggs)
+				task.wait(0.25)
 			end
 		end)
 	else
+		-- Clean Disconnect
 		if eggConn then
 			eggConn:Disconnect()
 			eggConn = nil
 		end
+		table.clear(pendingEggs)
 	end
 end)
 
