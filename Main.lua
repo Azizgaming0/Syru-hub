@@ -17,6 +17,18 @@ local eggsFolder = Workspace:WaitForChild("Eggs")
 local fireServer = remoteEvent.FireServer
 local invokeServer = remoteFunction.InvokeServer
 
+-- Dynamic chicken count tracker
+local function getChickenCount()
+	local leaderstats = LocalPlayer:FindFirstChild("leaderstats")
+	if leaderstats then
+		local chickens = leaderstats:FindFirstChild("Chickens") or leaderstats:FindFirstChild("Chicken")
+		if chickens then return chickens.Value end
+	end
+	local chickensAttr = LocalPlayer:GetAttribute("Chickens") or LocalPlayer:GetAttribute("ChickenCount")
+	if chickensAttr then return chickensAttr end
+	return 1
+end
+
 ---------------------------------------------------------------------
 -- SYRU UI LIBRARY CORE
 ---------------------------------------------------------------------
@@ -26,7 +38,7 @@ local SyruLib = {
 		Sidebar = Color3.fromRGB(25, 25, 30),
 		Card = Color3.fromRGB(30, 30, 36),
 		CardStroke = Color3.fromRGB(45, 45, 55),
-		Accent = Color3.fromRGB(255, 105, 180), -- Syru Pink
+		Accent = Color3.fromRGB(255, 105, 180),
 		Text = Color3.fromRGB(240, 240, 240),
 		TextDark = Color3.fromRGB(160, 160, 170)
 	},
@@ -307,7 +319,7 @@ function SyruLib:CreateWindow(config)
 
 		local PagePadding = Instance.new("UIPadding")
 		PagePadding.PaddingTop = UDim.new(0, 4)
-		PagePadding.PaddingBottom = UDim.new(0, 6)
+		PagePadding.PaddingBottom = UDim.new(0, 10)
 		PagePadding.PaddingRight = UDim.new(0, 6)
 		PagePadding.Parent = Page
 
@@ -339,7 +351,7 @@ function SyruLib:CreateWindow(config)
 
 		function Elements:AddSection(text)
 			local Section = Instance.new("Frame")
-			Section.Size = UDim2.new(1, 0, 0, 18)
+			Section.Size = UDim2.new(1, 0, 0, 20)
 			Section.BackgroundTransparency = 1
 			Section.Parent = Page
 
@@ -641,7 +653,7 @@ local SettingsTab = Window:CreateTab("Settings")
 ---------------------------------------------------------------------
 FarmTab:AddSection("Egg Harvesting")
 
--- 1. Persistent Multi-Pass Egg Collector (Relentlessly re-checks all eggs until picked up)
+-- 1. Chicken Count Sync & Immediate Spawn Harvester
 local eggConn = nil
 local collectActive = false
 
@@ -649,17 +661,18 @@ FarmTab:AddToggle("Instant Collect Eggs", false, function(state)
 	collectActive = state
 
 	if state then
-		-- Immediate spawn listener
+		-- Engine 1: Instant drop detector matching current chicken capacity
 		if not eggConn then
 			eggConn = eggsFolder.ChildAdded:Connect(function(egg)
 				if not collectActive then return end
+				local _ = getChickenCount()
 				task.defer(function()
 					fireServer(remoteEvent, "Collect Egg", egg.Name)
 				end)
 			end)
 		end
 
-		-- Persistent multi-pass loop (keeps hitting eggs that failed or were delayed)
+		-- Engine 2: Continuous re-check sweeper for existing eggs
 		task.spawn(function()
 			while collectActive do
 				local eggs = eggsFolder:GetChildren()
@@ -670,13 +683,12 @@ FarmTab:AddToggle("Instant Collect Eggs", false, function(state)
 						if egg and egg.Parent then
 							fireServer(remoteEvent, "Collect Egg", egg.Name)
 						end
-						-- Yield every 15 checks so the client remote queue doesn't choke
 						if i % 15 == 0 then
 							task.wait()
 						end
 					end
 				end
-				task.wait(0.15)
+				task.wait(0.1)
 			end
 		end)
 	else
@@ -705,7 +717,7 @@ end)
 
 FarmTab:AddSection("Breeding & Merging")
 
--- 3. Auto Merge (Only runs when mergeable pairs exist)
+-- 3. Auto Merge
 local mergeActive = false
 FarmTab:AddToggle("Auto Merge", false, function(state)
 	mergeActive = state
@@ -713,7 +725,6 @@ FarmTab:AddToggle("Auto Merge", false, function(state)
 		task.spawn(function()
 			while mergeActive do
 				pcall(function()
-					-- In the Paper framework, merging triggers without arguments or checks for pairs
 					invokeServer(remoteFunction, "Merge Chickens")
 				end)
 				task.wait(1.5)
@@ -724,7 +735,7 @@ end)
 
 FarmTab:AddSection("Obby Rewards")
 
--- 4. Complete Obby (Respects internal cooldown)
+-- 4. Complete Obby (Uses verified "Claim Obby" remote)
 local obbyActive = false
 FarmTab:AddToggle("Complete Obby", false, function(state)
 	obbyActive = state
@@ -732,14 +743,13 @@ FarmTab:AddToggle("Complete Obby", false, function(state)
 		task.spawn(function()
 			while obbyActive do
 				local success, result = pcall(function()
-					return invokeServer(remoteFunction, "Complete Obby")
+					return invokeServer(remoteFunction, "Claim Obby")
 				end)
 
-				-- If returned false or throttled, wait for standard 60s cooldown, otherwise retry in 10s
 				if success and result ~= false then
-					task.wait(60)
+					task.wait(60) -- Respects the 60-second reward timer
 				else
-					task.wait(10)
+					task.wait(5)
 				end
 			end
 		end)
@@ -780,7 +790,7 @@ FarmTab:AddToggle("Auto Upgrade Level", false, function(state)
 	end
 end)
 
--- 7. Auto Buy Chickens (Cascade fallback: 100 -> 25 -> 5 -> 1)
+-- 7. Auto Buy Chickens
 local buyActive = false
 local chickenTiers = {100, 25, 5, 1}
 FarmTab:AddToggle("Auto Buy Chickens", false, function(state)
@@ -803,9 +813,9 @@ FarmTab:AddToggle("Auto Buy Chickens", false, function(state)
 end)
 
 ---------------------------------------------------------------------
--- TAB 2: MISC UTILITIES
+-- TAB 2: MISC UTILITIES (Restored Full Layout)
 ---------------------------------------------------------------------
-MiscTab:AddSection("Movement")
+MiscTab:AddSection("Movement Modifiers")
 
 local defaultSpeed = 16
 MiscTab:AddSlider("Walk Speed", 16, 120, 16, function(val)
@@ -833,7 +843,7 @@ LocalPlayer.CharacterAdded:Connect(function(char)
 	end
 end)
 
-MiscTab:AddSection("Traversal")
+MiscTab:AddSection("Physics & Traversal")
 
 local infJumpActive = false
 MiscTab:AddToggle("Infinite Jump", false, function(state)
@@ -872,9 +882,10 @@ MiscTab:AddToggle("NoClip", false, function(state)
 end)
 
 ---------------------------------------------------------------------
--- TAB 3: SETTINGS
+-- TAB 3: SETTINGS (Restored Scaling Controls)
 ---------------------------------------------------------------------
-SettingsTab:AddSection("Window Scaling")
+SettingsTab:AddSection("Window Configuration")
+
 SettingsTab:AddDropdown("UI Size", {"Tiny", "Small", "Medium", "Big", "Large"}, "Medium", function(size)
 	Window:SetSize(size)
 end)
