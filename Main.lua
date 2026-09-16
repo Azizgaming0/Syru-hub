@@ -8,7 +8,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local LocalPlayer = Players.LocalPlayer
 
--- Pre-cache game remotes and containers
+-- Pre-cache remotes and containers
 local remotes = ReplicatedStorage:WaitForChild("Paper"):WaitForChild("Remotes")
 local remoteEvent = remotes:WaitForChild("__remoteevent")
 local remoteFunction = remotes:WaitForChild("__remotefunction")
@@ -18,12 +18,12 @@ local fireServer = remoteEvent.FireServer
 local invokeServer = remoteFunction.InvokeServer
 
 local function getRoot()
-	local char = LocalPlayer.Character
-	return char and (char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso"))
+	local char = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+	return char:WaitForChild("HumanoidRootPart")
 end
 
 ---------------------------------------------------------------------
--- SYRU UI LIBRARY CORE
+-- SYRU UI LIBRARY
 ---------------------------------------------------------------------
 local SyruLib = {
 	Theme = {
@@ -86,7 +86,7 @@ function SyruLib:CreateWindow(config)
 	MainStroke.Parent = Main
 
 	---------------------------------------------------------------------
-	-- FLOATING "SYRU" BUTTON
+	-- FLOATING TOGGLE BUTTON
 	---------------------------------------------------------------------
 	local ToggleBtn = Instance.new("TextButton")
 	ToggleBtn.Name = "SyruToggle"
@@ -143,7 +143,7 @@ function SyruLib:CreateWindow(config)
 	end)
 
 	---------------------------------------------------------------------
-	-- SIDEBAR & TOP DRAGGING
+	-- SIDEBAR & DRAGGING
 	---------------------------------------------------------------------
 	local Sidebar = Instance.new("Frame")
 	Sidebar.Name = "Sidebar"
@@ -249,13 +249,9 @@ function SyruLib:CreateWindow(config)
 	end)
 
 	---------------------------------------------------------------------
-	-- WINDOW INTERFACE & TABS
+	-- TABS & CONTROLS BUILDER
 	---------------------------------------------------------------------
-	local Window = {
-		Tabs = {},
-		ActiveTab = nil,
-		CurrentSize = "Medium"
-	}
+	local Window = { Tabs = {}, ActiveTab = nil, CurrentSize = "Medium" }
 
 	function Window:SetSize(sizeName)
 		local targetDimensions = SyruLib.Sizes[sizeName]
@@ -341,9 +337,6 @@ function SyruLib:CreateWindow(config)
 
 		if #Window.Tabs == 1 then activateTab() end
 
-		---------------------------------------------------------------------
-		-- ELEMENTS BUILDER
-		---------------------------------------------------------------------
 		local Elements = {}
 		local elementOrder = 0
 
@@ -399,6 +392,7 @@ function SyruLib:CreateWindow(config)
 			Label.TextSize = 12
 			Label.Font = Enum.Font.GothamSemibold
 			Label.TextXAlignment = Enum.TextXAlignment.Left
+			Label.Active = false -- Avoid blocking parent button clicks
 			Label.Parent = Toggle
 
 			local Switch = Instance.new("Frame")
@@ -406,6 +400,7 @@ function SyruLib:CreateWindow(config)
 			Switch.Position = UDim2.new(1, -40, 0.5, -9)
 			Switch.BackgroundColor3 = state and accentColor or Color3.fromRGB(45, 45, 52)
 			Switch.BorderSizePixel = 0
+			Switch.Active = false
 			Switch.Parent = Toggle
 
 			local SwitchCorner = Instance.new("UICorner")
@@ -417,6 +412,7 @@ function SyruLib:CreateWindow(config)
 			Circle.Position = state and UDim2.new(1, -15, 0.5, -6) or UDim2.new(0, 3, 0.5, -6)
 			Circle.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
 			Circle.BorderSizePixel = 0
+			Circle.Active = false
 			Circle.Parent = Switch
 
 			local CircleCorner = Instance.new("UICorner")
@@ -569,6 +565,7 @@ function SyruLib:CreateWindow(config)
 			Label.TextSize = 12
 			Label.Font = Enum.Font.GothamSemibold
 			Label.TextXAlignment = Enum.TextXAlignment.Left
+			Label.Active = false
 			Label.Parent = HeaderBtn
 
 			local ValLabel = Instance.new("TextLabel")
@@ -580,6 +577,7 @@ function SyruLib:CreateWindow(config)
 			ValLabel.TextSize = 11
 			ValLabel.Font = Enum.Font.GothamBold
 			ValLabel.TextXAlignment = Enum.TextXAlignment.Right
+			ValLabel.Active = false
 			ValLabel.Parent = HeaderBtn
 
 			local Arrow = Instance.new("TextLabel")
@@ -590,6 +588,7 @@ function SyruLib:CreateWindow(config)
 			Arrow.TextColor3 = SyruLib.Theme.TextDark
 			Arrow.TextSize = 11
 			Arrow.Font = Enum.Font.GothamBold
+			Arrow.Active = false
 			Arrow.Parent = HeaderBtn
 
 			local OptionContainer = Instance.new("Frame")
@@ -643,7 +642,7 @@ function SyruLib:CreateWindow(config)
 end
 
 ---------------------------------------------------------------------
--- WINDOW INITIALIZATION
+-- WINDOW INITIALIZATION & TABS
 ---------------------------------------------------------------------
 local Window = SyruLib:CreateWindow({
 	Title = "SYRU HUB",
@@ -662,7 +661,6 @@ FarmTab:AddSection("Egg Harvesting")
 
 local collectActive = false
 local returnToStart = true
-local collectDelay = 0.05
 
 FarmTab:AddToggle("Auto Teleport Collect Eggs", false, function(state)
 	collectActive = state
@@ -671,42 +669,43 @@ FarmTab:AddToggle("Auto Teleport Collect Eggs", false, function(state)
 		task.spawn(function()
 			while collectActive do
 				local root = getRoot()
-				if root then
-					local eggs = eggsFolder:GetChildren()
-					if #eggs > 0 then
-						local originCFrame = root.CFrame
+				local eggs = eggsFolder:GetChildren()
 
-						for i = 1, #eggs do
-							if not collectActive then break end
-							local egg = eggs[i]
-							if egg and egg.Parent then
-								-- Find target CFrame for both Models and Parts
-								local targetCFrame = nil
-								if egg:IsA("Model") then
-									targetCFrame = egg:GetPivot()
-								elseif egg:IsA("BasePart") then
-									targetCFrame = egg.CFrame
-								else
-									local part = egg:FindFirstChildWhichIsA("BasePart")
-									if part then targetCFrame = part.CFrame end
-								end
+				if root and #eggs > 0 then
+					local savedOrigin = root.CFrame
 
-								if targetCFrame then
-									-- Move to egg to satisfy server distance check
-									root.CFrame = targetCFrame
-									fireServer(remoteEvent, "Collect Egg", egg.Name)
-									task.wait(collectDelay)
+					for i = 1, #eggs do
+						if not collectActive then break end
+						local egg = eggs[i]
+
+						if egg and egg.Parent then
+							local pos = egg:IsA("Model") and egg:GetPivot()
+								or (egg:IsA("BasePart") and egg.CFrame)
+								or (egg:FindFirstChildWhichIsA("BasePart") and egg:FindFirstChildWhichIsA("BasePart").CFrame)
+
+							if pos then
+								root.CFrame = pos + Vector3.new(0, 1.5, 0)
+								root.AssemblyLinearVelocity = Vector3.zero
+								task.wait(0.08)
+
+								fireServer(remoteEvent, "Collect Egg", egg.Name)
+
+								local t = 0
+								while egg.Parent and t < 0.2 do
+									task.wait(0.02)
+									t = t + 0.02
 								end
 							end
 						end
+					end
 
-						-- Return to initial position if toggle is enabled
-						if returnToStart and root and collectActive then
-							root.CFrame = originCFrame
-						end
+					if returnToStart and root and collectActive then
+						root.CFrame = savedOrigin
+						root.AssemblyLinearVelocity = Vector3.zero
 					end
 				end
-				task.wait(0.2)
+
+				task.wait(0.3)
 			end
 		end)
 	end
@@ -752,7 +751,7 @@ end)
 
 FarmTab:AddSection("Obby Rewards")
 
--- 4. Complete Obby (Multi-Method Probe + Physical Pad Touch Bypass)
+-- 4. Complete Obby
 local obbyActive = false
 FarmTab:AddToggle("Complete Obby", false, function(state)
 	obbyActive = state
