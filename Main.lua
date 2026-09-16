@@ -22,11 +22,42 @@ local function getChickenCount()
 	local leaderstats = LocalPlayer:FindFirstChild("leaderstats")
 	if leaderstats then
 		local chickens = leaderstats:FindFirstChild("Chickens") or leaderstats:FindFirstChild("Chicken")
-		if chickens then return chickens.Value end
+		if chickens and tonumber(chickens.Value) then 
+			return tonumber(chickens.Value) 
+		end
 	end
 	local chickensAttr = LocalPlayer:GetAttribute("Chickens") or LocalPlayer:GetAttribute("ChickenCount")
-	if chickensAttr then return chickensAttr end
-	return 1
+	if chickensAttr and tonumber(chickensAttr) then 
+		return tonumber(chickensAttr) 
+	end
+	return 10
+end
+
+-- Dynamic Obby Timer Reader
+local function getObbyCooldown()
+	local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
+	if not playerGui then return 0 end
+
+	for _, gui in ipairs(playerGui:GetChildren()) do
+		if gui:IsA("ScreenGui") and gui.Enabled then
+			for _, desc in ipairs(gui:GetDescendants()) do
+				if desc:IsA("TextLabel") and desc.Visible then
+					local text = desc.Text
+					-- Detect MM:SS format (e.g. 01:30)
+					local min, sec = text:match("(%d+):(%d%d)")
+					if min and sec then
+						return (tonumber(min) * 60) + tonumber(sec)
+					end
+					-- Detect "Xs" or "X sec" format
+					local rawSec = text:match("(%d+)%s*[sS]")
+					if rawSec then
+						return tonumber(rawSec)
+					end
+				end
+			end
+		end
+	end
+	return 0
 end
 
 ---------------------------------------------------------------------
@@ -150,7 +181,7 @@ function SyruLib:CreateWindow(config)
 	end)
 
 	---------------------------------------------------------------------
-	-- SIDEBAR & DRAGGING
+	-- SIDEBAR & TOP DRAGGING
 	---------------------------------------------------------------------
 	local Sidebar = Instance.new("Frame")
 	Sidebar.Name = "Sidebar"
@@ -308,7 +339,6 @@ function SyruLib:CreateWindow(config)
 		Page.ScrollBarThickness = 3
 		Page.ScrollBarImageColor3 = Color3.fromRGB(60, 60, 70)
 		Page.CanvasSize = UDim2.new(0, 0, 0, 0)
-		Page.AutomaticCanvasSize = Enum.AutomaticSize.Y
 		Page.Visible = false
 		Page.Parent = ContentContainer
 
@@ -319,9 +349,14 @@ function SyruLib:CreateWindow(config)
 
 		local PagePadding = Instance.new("UIPadding")
 		PagePadding.PaddingTop = UDim.new(0, 4)
-		PagePadding.PaddingBottom = UDim.new(0, 10)
+		PagePadding.PaddingBottom = UDim.new(0, 14)
 		PagePadding.PaddingRight = UDim.new(0, 6)
 		PagePadding.Parent = Page
+
+		-- Dynamic Canvas Calculation (Fixed for Mobile)
+		PageLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+			Page.CanvasSize = UDim2.new(0, 0, 0, PageLayout.AbsoluteContentSize.Y + 20)
+		end)
 
 		local function activateTab()
 			for _, tab in pairs(Window.Tabs) do
@@ -332,6 +367,8 @@ function SyruLib:CreateWindow(config)
 				}):Play()
 			end
 			Page.Visible = true
+			-- Immediate sync of content size on tab switch
+			Page.CanvasSize = UDim2.new(0, 0, 0, PageLayout.AbsoluteContentSize.Y + 20)
 			TweenService:Create(TabButton, TweenInfo.new(0.15), {
 				BackgroundColor3 = Color3.fromRGB(35, 35, 42),
 				TextColor3 = accentColor
@@ -345,14 +382,21 @@ function SyruLib:CreateWindow(config)
 		if #Window.Tabs == 1 then activateTab() end
 
 		---------------------------------------------------------------------
-		-- ELEMENTS BUILDER
+		-- ELEMENTS BUILDER (Ordered Elements)
 		---------------------------------------------------------------------
 		local Elements = {}
+		local elementOrder = 0
+
+		local function nextOrder()
+			elementOrder = elementOrder + 1
+			return elementOrder
+		end
 
 		function Elements:AddSection(text)
 			local Section = Instance.new("Frame")
 			Section.Size = UDim2.new(1, 0, 0, 20)
 			Section.BackgroundTransparency = 1
+			Section.LayoutOrder = nextOrder()
 			Section.Parent = Page
 
 			local SecLabel = Instance.new("TextLabel")
@@ -374,6 +418,7 @@ function SyruLib:CreateWindow(config)
 			Toggle.BackgroundColor3 = SyruLib.Theme.Card
 			Toggle.AutoButtonColor = false
 			Toggle.Text = ""
+			Toggle.LayoutOrder = nextOrder()
 			Toggle.Parent = Page
 
 			local ToggleCorner = Instance.new("UICorner")
@@ -444,6 +489,7 @@ function SyruLib:CreateWindow(config)
 			local Slider = Instance.new("Frame")
 			Slider.Size = UDim2.new(1, 0, 0, 42)
 			Slider.BackgroundColor3 = SyruLib.Theme.Card
+			Slider.LayoutOrder = nextOrder()
 			Slider.Parent = Page
 
 			local SliderCorner = Instance.new("UICorner")
@@ -482,7 +528,7 @@ function SyruLib:CreateWindow(config)
 			Bar.Position = UDim2.new(0, 10, 1, -12)
 			Bar.BackgroundColor3 = Color3.fromRGB(45, 45, 52)
 			Bar.BorderSizePixel = 0
-			Bar.Parent = Bar
+			Bar.Parent = Slider
 
 			local BarCorner = Instance.new("UICorner")
 			BarCorner.CornerRadius = UDim.new(1, 0)
@@ -536,6 +582,7 @@ function SyruLib:CreateWindow(config)
 			Dropdown.Size = UDim2.new(1, 0, 0, 34)
 			Dropdown.BackgroundColor3 = SyruLib.Theme.Card
 			Dropdown.ClipsDescendants = true
+			Dropdown.LayoutOrder = nextOrder()
 			Dropdown.Parent = Page
 
 			local DropCorner = Instance.new("UICorner")
@@ -653,7 +700,7 @@ local SettingsTab = Window:CreateTab("Settings")
 ---------------------------------------------------------------------
 FarmTab:AddSection("Egg Harvesting")
 
--- 1. Chicken Count Sync & Immediate Spawn Harvester
+-- 1. Chicken Count Capacity Egg Harvester
 local eggConn = nil
 local collectActive = false
 
@@ -661,21 +708,23 @@ FarmTab:AddToggle("Instant Collect Eggs", false, function(state)
 	collectActive = state
 
 	if state then
-		-- Engine 1: Instant drop detector matching current chicken capacity
+		-- Engine 1: Instant drop listener
 		if not eggConn then
 			eggConn = eggsFolder.ChildAdded:Connect(function(egg)
 				if not collectActive then return end
-				local _ = getChickenCount()
 				task.defer(function()
 					fireServer(remoteEvent, "Collect Egg", egg.Name)
 				end)
 			end)
 		end
 
-		-- Engine 2: Continuous re-check sweeper for existing eggs
+		-- Engine 2: Continuous capacity-scaled sweeper
 		task.spawn(function()
 			while collectActive do
 				local eggs = eggsFolder:GetChildren()
+				local chickenFlock = getChickenCount()
+				local batchLimit = math.clamp(chickenFlock, 15, 60)
+
 				if #eggs > 0 then
 					for i = 1, #eggs do
 						if not collectActive then break end
@@ -683,7 +732,7 @@ FarmTab:AddToggle("Instant Collect Eggs", false, function(state)
 						if egg and egg.Parent then
 							fireServer(remoteEvent, "Collect Egg", egg.Name)
 						end
-						if i % 15 == 0 then
+						if i % batchLimit == 0 then
 							task.wait()
 						end
 					end
@@ -735,21 +784,28 @@ end)
 
 FarmTab:AddSection("Obby Rewards")
 
--- 4. Complete Obby (Uses verified "Claim Obby" remote)
+-- 4. Complete Obby (Synced to In-Game GUI Cooldown Timer)
 local obbyActive = false
 FarmTab:AddToggle("Complete Obby", false, function(state)
 	obbyActive = state
 	if state then
 		task.spawn(function()
 			while obbyActive do
-				local success, result = pcall(function()
-					return invokeServer(remoteFunction, "Claim Obby")
-				end)
+				local remainingCooldown = getObbyCooldown()
 
-				if success and result ~= false then
-					task.wait(60) -- Respects the 60-second reward timer
+				if remainingCooldown > 0 then
+					-- Sleep for the exact cooldown remaining (plus small buffer)
+					task.wait(remainingCooldown + 0.5)
 				else
-					task.wait(5)
+					local success, result = pcall(function()
+						return invokeServer(remoteFunction, "Claim Obby")
+					end)
+
+					if success and result ~= false then
+						task.wait(60)
+					else
+						task.wait(3)
+					end
 				end
 			end
 		end)
@@ -813,7 +869,7 @@ FarmTab:AddToggle("Auto Buy Chickens", false, function(state)
 end)
 
 ---------------------------------------------------------------------
--- TAB 2: MISC UTILITIES (Restored Full Layout)
+-- TAB 2: MISC UTILITIES (Always Rendered on Mobile)
 ---------------------------------------------------------------------
 MiscTab:AddSection("Movement Modifiers")
 
@@ -882,7 +938,7 @@ MiscTab:AddToggle("NoClip", false, function(state)
 end)
 
 ---------------------------------------------------------------------
--- TAB 3: SETTINGS (Restored Scaling Controls)
+-- TAB 3: SETTINGS (Always Rendered on Mobile)
 ---------------------------------------------------------------------
 SettingsTab:AddSection("Window Configuration")
 
