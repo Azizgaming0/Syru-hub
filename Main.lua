@@ -17,47 +17,9 @@ local eggsFolder = Workspace:WaitForChild("Eggs")
 local fireServer = remoteEvent.FireServer
 local invokeServer = remoteFunction.InvokeServer
 
--- Dynamic chicken count tracker
-local function getChickenCount()
-	local leaderstats = LocalPlayer:FindFirstChild("leaderstats")
-	if leaderstats then
-		local chickens = leaderstats:FindFirstChild("Chickens") or leaderstats:FindFirstChild("Chicken")
-		if chickens and tonumber(chickens.Value) then 
-			return tonumber(chickens.Value) 
-		end
-	end
-	local chickensAttr = LocalPlayer:GetAttribute("Chickens") or LocalPlayer:GetAttribute("ChickenCount")
-	if chickensAttr and tonumber(chickensAttr) then 
-		return tonumber(chickensAttr) 
-	end
-	return 10
-end
-
--- Dynamic Obby Timer Reader
-local function getObbyCooldown()
-	local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
-	if not playerGui then return 0 end
-
-	for _, gui in ipairs(playerGui:GetChildren()) do
-		if gui:IsA("ScreenGui") and gui.Enabled then
-			for _, desc in ipairs(gui:GetDescendants()) do
-				if desc:IsA("TextLabel") and desc.Visible then
-					local text = desc.Text
-					-- Detect MM:SS format (e.g. 01:30)
-					local min, sec = text:match("(%d+):(%d%d)")
-					if min and sec then
-						return (tonumber(min) * 60) + tonumber(sec)
-					end
-					-- Detect "Xs" or "X sec" format
-					local rawSec = text:match("(%d+)%s*[sS]")
-					if rawSec then
-						return tonumber(rawSec)
-					end
-				end
-			end
-		end
-	end
-	return 0
+local function getRoot()
+	local char = LocalPlayer.Character
+	return char and (char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso"))
 end
 
 ---------------------------------------------------------------------
@@ -353,7 +315,6 @@ function SyruLib:CreateWindow(config)
 		PagePadding.PaddingRight = UDim.new(0, 6)
 		PagePadding.Parent = Page
 
-		-- Dynamic Canvas Calculation (Fixed for Mobile)
 		PageLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
 			Page.CanvasSize = UDim2.new(0, 0, 0, PageLayout.AbsoluteContentSize.Y + 20)
 		end)
@@ -367,7 +328,6 @@ function SyruLib:CreateWindow(config)
 				}):Play()
 			end
 			Page.Visible = true
-			-- Immediate sync of content size on tab switch
 			Page.CanvasSize = UDim2.new(0, 0, 0, PageLayout.AbsoluteContentSize.Y + 20)
 			TweenService:Create(TabButton, TweenInfo.new(0.15), {
 				BackgroundColor3 = Color3.fromRGB(35, 35, 42),
@@ -382,7 +342,7 @@ function SyruLib:CreateWindow(config)
 		if #Window.Tabs == 1 then activateTab() end
 
 		---------------------------------------------------------------------
-		-- ELEMENTS BUILDER (Ordered Elements)
+		-- ELEMENTS BUILDER
 		---------------------------------------------------------------------
 		local Elements = {}
 		local elementOrder = 0
@@ -528,7 +488,7 @@ function SyruLib:CreateWindow(config)
 			Bar.Position = UDim2.new(0, 10, 1, -12)
 			Bar.BackgroundColor3 = Color3.fromRGB(45, 45, 52)
 			Bar.BorderSizePixel = 0
-			Bar.Parent = Slider
+			Bar.Parent = Bar
 
 			local BarCorner = Instance.new("UICorner")
 			BarCorner.CornerRadius = UDim.new(1, 0)
@@ -700,7 +660,7 @@ local SettingsTab = Window:CreateTab("Settings")
 ---------------------------------------------------------------------
 FarmTab:AddSection("Egg Harvesting")
 
--- 1. Chicken Count Capacity Egg Harvester
+-- 1. All-Egg Comprehensive Harvester (Dropped & Live Spawn)
 local eggConn = nil
 local collectActive = false
 
@@ -708,7 +668,7 @@ FarmTab:AddToggle("Instant Collect Eggs", false, function(state)
 	collectActive = state
 
 	if state then
-		-- Engine 1: Instant drop listener
+		-- Engine 1: Hook future egg drops immediately
 		if not eggConn then
 			eggConn = eggsFolder.ChildAdded:Connect(function(egg)
 				if not collectActive then return end
@@ -718,21 +678,31 @@ FarmTab:AddToggle("Instant Collect Eggs", false, function(state)
 			end)
 		end
 
-		-- Engine 2: Continuous capacity-scaled sweeper
+		-- Engine 2: Relentless sweeping of ALL existing & dropped eggs
 		task.spawn(function()
 			while collectActive do
 				local eggs = eggsFolder:GetChildren()
-				local chickenFlock = getChickenCount()
-				local batchLimit = math.clamp(chickenFlock, 15, 60)
-
 				if #eggs > 0 then
 					for i = 1, #eggs do
 						if not collectActive then break end
 						local egg = eggs[i]
 						if egg and egg.Parent then
+							-- Fire remote for the egg
 							fireServer(remoteEvent, "Collect Egg", egg.Name)
+
+							-- Simulate physical touch proximity if egg has a BasePart
+							local eggPart = egg:IsA("BasePart") and egg or egg:FindFirstChildWhichIsA("BasePart")
+							local root = getRoot()
+							if eggPart and root and firetouchinterest then
+								pcall(function()
+									firetouchinterest(root, eggPart, 0)
+									firetouchinterest(root, eggPart, 1)
+								end)
+							end
 						end
-						if i % batchLimit == 0 then
+
+						-- Pace fires to prevent client network drops
+						if i % 20 == 0 then
 							task.wait()
 						end
 					end
@@ -784,28 +754,47 @@ end)
 
 FarmTab:AddSection("Obby Rewards")
 
--- 4. Complete Obby (Synced to In-Game GUI Cooldown Timer)
+-- 4. Complete Obby (Multi-Method Probe + Physical Pad Touch Bypass)
 local obbyActive = false
 FarmTab:AddToggle("Complete Obby", false, function(state)
 	obbyActive = state
 	if state then
 		task.spawn(function()
 			while obbyActive do
-				local remainingCooldown = getObbyCooldown()
+				local claimed = false
 
-				if remainingCooldown > 0 then
-					-- Sleep for the exact cooldown remaining (plus small buffer)
-					task.wait(remainingCooldown + 0.5)
-				else
-					local success, result = pcall(function()
-						return invokeServer(remoteFunction, "Claim Obby")
+				-- Method A: Invoke standard Paper "Claim Obby" remote variations
+				pcall(function()
+					local r1 = invokeServer(remoteFunction, "Claim Obby")
+					if r1 ~= false and r1 ~= nil then claimed = true end
+				end)
+
+				if not claimed then
+					pcall(function()
+						local r2 = invokeServer(remoteFunction, "Claim Obby", 1)
+						if r2 ~= false and r2 ~= nil then claimed = true end
 					end)
+				end
 
-					if success and result ~= false then
-						task.wait(60)
-					else
-						task.wait(3)
+				-- Method B: Physical Pad Simulation (Searches for Obby end pad)
+				local root = getRoot()
+				if root and firetouchinterest then
+					for _, obj in ipairs(Workspace:GetDescendants()) do
+						if obj:IsA("BasePart") and (obj.Name:lower():find("finish") or obj.Name:lower():find("endpad") or obj.Name:lower():find("winpad")) then
+							pcall(function()
+								firetouchinterest(root, obj, 0)
+								firetouchinterest(root, obj, 1)
+								claimed = true
+							end)
+							break
+						end
 					end
+				end
+
+				if claimed then
+					task.wait(60) -- Standard obby reward cooldown
+				else
+					task.wait(10) -- Short retry if not yet ready
 				end
 			end
 		end)
@@ -869,7 +858,7 @@ FarmTab:AddToggle("Auto Buy Chickens", false, function(state)
 end)
 
 ---------------------------------------------------------------------
--- TAB 2: MISC UTILITIES (Always Rendered on Mobile)
+-- TAB 2: MISC UTILITIES
 ---------------------------------------------------------------------
 MiscTab:AddSection("Movement Modifiers")
 
@@ -938,7 +927,7 @@ MiscTab:AddToggle("NoClip", false, function(state)
 end)
 
 ---------------------------------------------------------------------
--- TAB 3: SETTINGS (Always Rendered on Mobile)
+-- TAB 3: SETTINGS
 ---------------------------------------------------------------------
 SettingsTab:AddSection("Window Configuration")
 
