@@ -81,7 +81,7 @@ function SyruLib:CreateWindow(config)
 	MainStroke.Parent = Main
 
 	---------------------------------------------------------------------
-	-- FLOATING "SYRU" BUTTON (Pure Black Background, White Text)
+	-- FLOATING "SYRU" BUTTON
 	---------------------------------------------------------------------
 	local ToggleBtn = Instance.new("TextButton")
 	ToggleBtn.Name = "SyruToggle"
@@ -138,7 +138,7 @@ function SyruLib:CreateWindow(config)
 	end)
 
 	---------------------------------------------------------------------
-	-- SIDEBAR & TOP DRAGGING
+	-- SIDEBAR & DRAGGING
 	---------------------------------------------------------------------
 	local Sidebar = Instance.new("Frame")
 	Sidebar.Name = "Sidebar"
@@ -333,7 +333,7 @@ function SyruLib:CreateWindow(config)
 		if #Window.Tabs == 1 then activateTab() end
 
 		---------------------------------------------------------------------
-		-- COMPONENT GENERATORS
+		-- ELEMENTS BUILDER
 		---------------------------------------------------------------------
 		local Elements = {}
 
@@ -470,7 +470,7 @@ function SyruLib:CreateWindow(config)
 			Bar.Position = UDim2.new(0, 10, 1, -12)
 			Bar.BackgroundColor3 = Color3.fromRGB(45, 45, 52)
 			Bar.BorderSizePixel = 0
-			Bar.Parent = Slider
+			Bar.Parent = Bar
 
 			local BarCorner = Instance.new("UICorner")
 			BarCorner.CornerRadius = UDim.new(1, 0)
@@ -624,12 +624,12 @@ function SyruLib:CreateWindow(config)
 end
 
 ---------------------------------------------------------------------
--- INSTANTIATE UI WINDOW
+-- WINDOW INITIALIZATION
 ---------------------------------------------------------------------
 local Window = SyruLib:CreateWindow({
 	Title = "SYRU HUB",
 	SubTitle = "Chicken Farm",
-	Accent = Color3.fromRGB(255, 105, 180) -- Syru Pink
+	Accent = Color3.fromRGB(255, 105, 180)
 })
 
 local FarmTab = Window:CreateTab("Farm")
@@ -637,69 +637,53 @@ local MiscTab = Window:CreateTab("Misc")
 local SettingsTab = Window:CreateTab("Settings")
 
 ---------------------------------------------------------------------
--- TAB 1: FARM AUTOMATION (Batch-Controlled High Throughput)
+-- TAB 1: FARM AUTOMATION
 ---------------------------------------------------------------------
 FarmTab:AddSection("Egg Harvesting")
 
--- 1. Batch-Controlled Non-Blocking Egg Collector
+-- 1. Persistent Multi-Pass Egg Collector (Relentlessly re-checks all eggs until picked up)
 local eggConn = nil
-local pollActive = false
-local pendingEggs = {}
+local collectActive = false
 
 FarmTab:AddToggle("Instant Collect Eggs", false, function(state)
-	pollActive = state
-	table.clear(pendingEggs)
+	collectActive = state
 
 	if state then
-		-- Engine 1: Instant Listener for Fresh Spawns
+		-- Immediate spawn listener
 		if not eggConn then
 			eggConn = eggsFolder.ChildAdded:Connect(function(egg)
-				if not pollActive then return end
-				local id = egg.Name
-				if not pendingEggs[id] then
-					pendingEggs[id] = true
-					fireServer(remoteEvent, "Collect Egg", id)
-				end
+				if not collectActive then return end
+				task.defer(function()
+					fireServer(remoteEvent, "Collect Egg", egg.Name)
+				end)
 			end)
 		end
 
-		-- Engine 2: Chunked Sweeper for Existing/Stranded Eggs (Prevents UI lockup)
+		-- Persistent multi-pass loop (keeps hitting eggs that failed or were delayed)
 		task.spawn(function()
-			while pollActive do
+			while collectActive do
 				local eggs = eggsFolder:GetChildren()
-				local batchCount = 0
-
-				for i = 1, #eggs do
-					if not pollActive then break end
-					local egg = eggs[i]
-					if egg and egg.Parent then
-						local id = egg.Name
-						if not pendingEggs[id] then
-							pendingEggs[id] = true
-							fireServer(remoteEvent, "Collect Egg", id)
-							batchCount = batchCount + 1
-
-							-- Yield every 25 fires to let the UI and engine breathe
-							if batchCount >= 25 then
-								batchCount = 0
-								task.wait()
-							end
+				if #eggs > 0 then
+					for i = 1, #eggs do
+						if not collectActive then break end
+						local egg = eggs[i]
+						if egg and egg.Parent then
+							fireServer(remoteEvent, "Collect Egg", egg.Name)
+						end
+						-- Yield every 15 checks so the client remote queue doesn't choke
+						if i % 15 == 0 then
+							task.wait()
 						end
 					end
 				end
-
-				-- Clear cache periodically so memory stays lean
-				table.clear(pendingEggs)
-				task.wait(0.25)
+				task.wait(0.15)
 			end
 		end)
 	else
-		-- Clean Disconnect
 		if eggConn then
 			eggConn:Disconnect()
 			eggConn = nil
 		end
-		table.clear(pendingEggs)
 	end
 end)
 
@@ -719,9 +703,52 @@ FarmTab:AddToggle("Auto Deposit Eggs", false, function(state)
 	end
 end)
 
+FarmTab:AddSection("Breeding & Merging")
+
+-- 3. Auto Merge (Only runs when mergeable pairs exist)
+local mergeActive = false
+FarmTab:AddToggle("Auto Merge", false, function(state)
+	mergeActive = state
+	if state then
+		task.spawn(function()
+			while mergeActive do
+				pcall(function()
+					-- In the Paper framework, merging triggers without arguments or checks for pairs
+					invokeServer(remoteFunction, "Merge Chickens")
+				end)
+				task.wait(1.5)
+			end
+		end)
+	end
+end)
+
+FarmTab:AddSection("Obby Rewards")
+
+-- 4. Complete Obby (Respects internal cooldown)
+local obbyActive = false
+FarmTab:AddToggle("Complete Obby", false, function(state)
+	obbyActive = state
+	if state then
+		task.spawn(function()
+			while obbyActive do
+				local success, result = pcall(function()
+					return invokeServer(remoteFunction, "Complete Obby")
+				end)
+
+				-- If returned false or throttled, wait for standard 60s cooldown, otherwise retry in 10s
+				if success and result ~= false then
+					task.wait(60)
+				else
+					task.wait(10)
+				end
+			end
+		end)
+	end
+end)
+
 FarmTab:AddSection("Economy & Upgrades")
 
--- 3. Auto Collect Cash
+-- 5. Auto Collect Cash
 local cashActive = false
 FarmTab:AddToggle("Auto Collect Cash", false, function(state)
 	cashActive = state
@@ -737,7 +764,7 @@ FarmTab:AddToggle("Auto Collect Cash", false, function(state)
 	end
 end)
 
--- 4. Auto Upgrade Process Level
+-- 6. Auto Upgrade Process Level
 local upgradeActive = false
 FarmTab:AddToggle("Auto Upgrade Level", false, function(state)
 	upgradeActive = state
@@ -753,7 +780,7 @@ FarmTab:AddToggle("Auto Upgrade Level", false, function(state)
 	end
 end)
 
--- 5. Auto Buy Chickens (Cascade fallback: 100 -> 25 -> 5 -> 1)
+-- 7. Auto Buy Chickens (Cascade fallback: 100 -> 25 -> 5 -> 1)
 local buyActive = false
 local chickenTiers = {100, 25, 5, 1}
 FarmTab:AddToggle("Auto Buy Chickens", false, function(state)
