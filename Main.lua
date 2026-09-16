@@ -660,62 +660,60 @@ local SettingsTab = Window:CreateTab("Settings")
 ---------------------------------------------------------------------
 FarmTab:AddSection("Egg Harvesting")
 
--- 1. All-Egg Comprehensive Harvester (Dropped & Live Spawn)
-local eggConn = nil
 local collectActive = false
+local returnToStart = true
+local collectDelay = 0.05
 
-FarmTab:AddToggle("Instant Collect Eggs", false, function(state)
+FarmTab:AddToggle("Auto Teleport Collect Eggs", false, function(state)
 	collectActive = state
 
 	if state then
-		-- Engine 1: Hook future egg drops immediately
-		if not eggConn then
-			eggConn = eggsFolder.ChildAdded:Connect(function(egg)
-				if not collectActive then return end
-				task.defer(function()
-					fireServer(remoteEvent, "Collect Egg", egg.Name)
-				end)
-			end)
-		end
-
-		-- Engine 2: Relentless sweeping of ALL existing & dropped eggs
 		task.spawn(function()
 			while collectActive do
-				local eggs = eggsFolder:GetChildren()
-				if #eggs > 0 then
-					for i = 1, #eggs do
-						if not collectActive then break end
-						local egg = eggs[i]
-						if egg and egg.Parent then
-							-- Fire remote for the egg
-							fireServer(remoteEvent, "Collect Egg", egg.Name)
+				local root = getRoot()
+				if root then
+					local eggs = eggsFolder:GetChildren()
+					if #eggs > 0 then
+						local originCFrame = root.CFrame
 
-							-- Simulate physical touch proximity if egg has a BasePart
-							local eggPart = egg:IsA("BasePart") and egg or egg:FindFirstChildWhichIsA("BasePart")
-							local root = getRoot()
-							if eggPart and root and firetouchinterest then
-								pcall(function()
-									firetouchinterest(root, eggPart, 0)
-									firetouchinterest(root, eggPart, 1)
-								end)
+						for i = 1, #eggs do
+							if not collectActive then break end
+							local egg = eggs[i]
+							if egg and egg.Parent then
+								-- Find target CFrame for both Models and Parts
+								local targetCFrame = nil
+								if egg:IsA("Model") then
+									targetCFrame = egg:GetPivot()
+								elseif egg:IsA("BasePart") then
+									targetCFrame = egg.CFrame
+								else
+									local part = egg:FindFirstChildWhichIsA("BasePart")
+									if part then targetCFrame = part.CFrame end
+								end
+
+								if targetCFrame then
+									-- Move to egg to satisfy server distance check
+									root.CFrame = targetCFrame
+									fireServer(remoteEvent, "Collect Egg", egg.Name)
+									task.wait(collectDelay)
+								end
 							end
 						end
 
-						-- Pace fires to prevent client network drops
-						if i % 20 == 0 then
-							task.wait()
+						-- Return to initial position if toggle is enabled
+						if returnToStart and root and collectActive then
+							root.CFrame = originCFrame
 						end
 					end
 				end
-				task.wait(0.1)
+				task.wait(0.2)
 			end
 		end)
-	else
-		if eggConn then
-			eggConn:Disconnect()
-			eggConn = nil
-		end
 	end
+end)
+
+FarmTab:AddToggle("Return to Origin Spot", true, function(state)
+	returnToStart = state
 end)
 
 -- 2. Auto Deposit Eggs
@@ -763,7 +761,6 @@ FarmTab:AddToggle("Complete Obby", false, function(state)
 			while obbyActive do
 				local claimed = false
 
-				-- Method A: Invoke standard Paper "Claim Obby" remote variations
 				pcall(function()
 					local r1 = invokeServer(remoteFunction, "Claim Obby")
 					if r1 ~= false and r1 ~= nil then claimed = true end
@@ -776,7 +773,6 @@ FarmTab:AddToggle("Complete Obby", false, function(state)
 					end)
 				end
 
-				-- Method B: Physical Pad Simulation (Searches for Obby end pad)
 				local root = getRoot()
 				if root and firetouchinterest then
 					for _, obj in ipairs(Workspace:GetDescendants()) do
@@ -792,9 +788,9 @@ FarmTab:AddToggle("Complete Obby", false, function(state)
 				end
 
 				if claimed then
-					task.wait(60) -- Standard obby reward cooldown
+					task.wait(60)
 				else
-					task.wait(10) -- Short retry if not yet ready
+					task.wait(10)
 				end
 			end
 		end)
