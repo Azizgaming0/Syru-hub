@@ -81,7 +81,7 @@ function SyruLib:CreateWindow(config)
 	MainStroke.Parent = Main
 
 	---------------------------------------------------------------------
-	-- FLOATING "SYRU" BUTTON (Black Background, White Text)
+	-- FLOATING "SYRU" BUTTON (Pure Black Background, White Text)
 	---------------------------------------------------------------------
 	local ToggleBtn = Instance.new("TextButton")
 	ToggleBtn.Name = "SyruToggle"
@@ -138,7 +138,7 @@ function SyruLib:CreateWindow(config)
 	end)
 
 	---------------------------------------------------------------------
-	-- SIDEBAR & DRAGGING
+	-- SIDEBAR & TOP DRAGGING
 	---------------------------------------------------------------------
 	local Sidebar = Instance.new("Frame")
 	Sidebar.Name = "Sidebar"
@@ -333,7 +333,7 @@ function SyruLib:CreateWindow(config)
 		if #Window.Tabs == 1 then activateTab() end
 
 		---------------------------------------------------------------------
-		-- ELEMENTS BUILDER
+		-- COMPONENT GENERATORS
 		---------------------------------------------------------------------
 		local Elements = {}
 
@@ -624,7 +624,7 @@ function SyruLib:CreateWindow(config)
 end
 
 ---------------------------------------------------------------------
--- WINDOW INITIALIZATION
+-- INSTANTIATE UI WINDOW
 ---------------------------------------------------------------------
 local Window = SyruLib:CreateWindow({
 	Title = "SYRU HUB",
@@ -637,24 +637,41 @@ local MiscTab = Window:CreateTab("Misc")
 local SettingsTab = Window:CreateTab("Settings")
 
 ---------------------------------------------------------------------
--- TAB 1: FARM AUTOMATION (Loop-Safe Toggles)
+-- TAB 1: FARM AUTOMATION (High-Speed & Loop-Safe)
 ---------------------------------------------------------------------
 FarmTab:AddSection("Egg Harvesting")
 
--- 1. Instant Collect Eggs
+-- 1. High-Speed Dual-Engine Egg Collector
 local eggConn = nil
+local pollActive = false
+
 FarmTab:AddToggle("Instant Collect Eggs", false, function(state)
+	pollActive = state
 	if state then
-		-- Sweep current eggs
-		for _, egg in ipairs(eggsFolder:GetChildren()) do
-			fireServer(remoteEvent, "Collect Egg", egg.Name)
-		end
-		-- Instant hook for new drops
+		-- Engine 1: Micro-deferred Event Listener
 		if not eggConn then
 			eggConn = eggsFolder.ChildAdded:Connect(function(egg)
-				fireServer(remoteEvent, "Collect Egg", egg.Name)
+				task.defer(function()
+					fireServer(remoteEvent, "Collect Egg", egg.Name)
+				end)
 			end)
 		end
+
+		-- Engine 2: 10Hz Threaded Catch-up Sweeper
+		task.spawn(function()
+			while pollActive do
+				local eggs = eggsFolder:GetChildren()
+				if #eggs > 0 then
+					for i = 1, #eggs do
+						local egg = eggs[i]
+						if egg and egg.Parent then
+							task.spawn(fireServer, remoteEvent, "Collect Egg", egg.Name)
+						end
+					end
+				end
+				task.wait(0.1)
+			end
+		end)
 	else
 		if eggConn then
 			eggConn:Disconnect()
@@ -811,4 +828,3 @@ SettingsTab:AddSection("Window Scaling")
 SettingsTab:AddDropdown("UI Size", {"Tiny", "Small", "Medium", "Big", "Large"}, "Medium", function(size)
 	Window:SetSize(size)
 end)
-
